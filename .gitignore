@@ -1,0 +1,40 @@
+# Kubernetes credentials and local configuration
+kubeconfig
+kubeconfig.*
+*.kubeconfig
+.kube/
+
+# Environment files and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+secrets.yaml
+secrets.yml
+credentials.yaml
+credentials.yml
+*-secret.yaml
+*-secret.yml
+*-credentials.yaml
+*-credentials.yml
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*.bak
+*.log
+tmp/
+.tmp/
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/

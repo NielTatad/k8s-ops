@@ -1,0 +1,107 @@
+name: Validate Kubernetes Manifests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Lint and validate manifests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install yamllint
+        run: python -m pip install --disable-pip-version-check yamllint
+
+      - name: Lint YAML
+        run: yamllint .
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Build Kustomize overlay
+        run: kubectl kustomize clusters/floci-eks > /tmp/rendered-manifests.yaml
+
+      - name: Validate rendered manifests
+        run: kubectl apply --dry-run=client -f /tmp/rendered-manifests.yaml
+
+  deploy:
+    name: Deploy to Floci EKS
+    needs: validate
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, linux]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Verify deployment prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          export KUBECONFIG="$HOME/.kube/config"
+
+          test -f "$KUBECONFIG" || {
+            echo "Kubeconfig not found at $KUBECONFIG" >&2
+            exit 1
+          }
+          command -v kubectl >/dev/null || {
+            echo "kubectl must be installed on the self-hosted runner" >&2
+            exit 1
+          }
+          test -f clusters/floci-eks/kustomization.yaml || {
+            echo "The clusters/floci-eks overlay is missing" >&2
+            exit 1
+          }
+
+          current_context="$(kubectl config current-context)"
+          kubectl config get-contexts
+          if [ "$current_context" != "floci-eks" ]; then
+            echo "Refusing deployment: active context is '$current_context', not 'floci-eks'" >&2
+            exit 1
+          fi
+
+          kubectl get nodes
+          kubectl get namespaces
+
+      - name: Build, preview, and apply overlay
+        shell: bash
+        run: |
+          set -euo pipefail
+          export KUBECONFIG="$HOME/.kube/config"
+
+          kubectl kustomize clusters/floci-eks
+
+          set +e
+          kubectl diff -k clusters/floci-eks
+          diff_status=$?
+          set -e
+          case "$diff_status" in
+            0) echo "No Kubernetes changes detected." ;;
+            1) echo "Kubernetes changes detected; applying overlay." ;;
+            *)
+              echo "kubectl diff failed with exit code $diff_status" >&2
+              exit "$diff_status"
+              ;;
+          esac
+
+          kubectl apply -k clusters/floci-eks
+
+      - name: Verify deployed resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          export KUBECONFIG="$HOME/.kube/config"
+          kubectl get namespaces
+          kubectl get all -n monitoring
+          kubectl get all -n infrastructure
