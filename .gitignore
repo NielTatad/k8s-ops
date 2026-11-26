@@ -38,3 +38,6 @@ Thumbs.db
 Desktop.ini
 .vscode/
 .idea/
+
+# GitHub Actions self-hosted runner
+actions-runner/
