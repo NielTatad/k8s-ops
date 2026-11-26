@@ -9,12 +9,19 @@ the `monitoring` and `infrastructure` namespaces only.
 
 ```text
 .
-|-- clusters/
-|   `-- floci-eks/             # Cluster overlay
-|-- namespaces/
-|   |-- infrastructure/        # infrastructure Namespace package
-|   `-- monitoring/            # monitoring Namespace package
-`-- .github/workflows/         # CI validation and manual CD deployment
+|-- clusters/                  # Cluster-specific composition overlays
+|-- namespaces/                # Reusable Namespace packages
+|-- apps/                      # Self-contained application packages
+|-- workloads/                 # Shared workload resource categories
+|-- networking/                # Shared networking resource categories
+|-- configuration/             # Shared ConfigMaps and secret templates
+|-- security/                  # RBAC and ServiceAccount resources
+|-- storage/                   # PVCs and StorageClasses
+|-- scaling/                   # HPAs and PodDisruptionBudgets
+|-- policies/                  # ResourceQuotas and LimitRanges
+|-- monitoring/                # Future monitoring platform resources
+|-- infrastructure/            # Future shared infrastructure resources
+`-- .github/workflows/         # CI validation and CD deployment workflow
 ```
 
 Namespaces are versioned Kubernetes `Namespace` resources. Managing them as
@@ -28,6 +35,48 @@ cluster-specific composition or customization. In this repository, each
 directory below `namespaces/` is a reusable resource package, while
 `clusters/floci-eks/` is the overlay that composes them for Floci EKS. Add a
 new cluster overlay rather than duplicating shared namespace manifests.
+
+## Resource organization
+
+Keep a resource next to the thing that owns it whenever possible. For example,
+an application's Deployment, Service, ConfigMap, and Secret template should
+live together in `apps/<application-name>/`. This makes the package portable
+and straightforward to render independently.
+
+Use the remaining top-level directories for shared or platform-owned resources:
+
+- `workloads/`: shared Deployments, StatefulSets, DaemonSets, Jobs, and CronJobs.
+- `networking/`: shared Services, Ingresses, and NetworkPolicies.
+- `configuration/`: shared ConfigMaps and encrypted-secret manifests or safe
+  templates; application-specific configuration stays with its application.
+- `security/`: ServiceAccounts and RBAC resources. Keep Roles and RoleBindings
+  namespace-scoped; use ClusterRoles only when cluster-wide access is required.
+- `storage/`: shared PersistentVolumeClaims and platform-owned StorageClasses.
+- `scaling/`: HorizontalPodAutoscalers and PodDisruptionBudgets.
+- `policies/`: namespace ResourceQuotas and LimitRanges.
+- `monitoring/` and `infrastructure/`: future platform components, added only
+  when there is a real manifest to manage.
+
+Directories holding only a README are intentional placeholders. They do not
+have `kustomization.yaml` files and are not deployable until real resources are
+added. This avoids accidental inclusion of unfinished configuration.
+
+## Adding an application
+
+Create `apps/<application-name>/` with that application's manifests and a
+`kustomization.yaml` that lists them. Then add `<application-name>` to the
+`resources` list in `apps/kustomization.yaml`. Render the application directly
+with `kubectl kustomize apps/<application-name>` before deciding whether a
+specific cluster overlay should reference it.
+
+Kubernetes Secrets are only base64-encoded by default; they are not encrypted
+merely because they use the `Secret` kind. Use a local ignored file or an
+encrypted workflow such as SOPS before introducing actual credentials. Never
+commit a real password, token, certificate, or private key.
+
+The `clusters/kind-services/` overlay is intentionally empty but valid. It
+reserves the composition point for resources explicitly intended for the Kind
+experiment cluster; it has no effect on Floci EKS.
 
 ## CI: validation
 
@@ -134,3 +183,24 @@ yamllint .
 kubectl kustomize clusters/floci-eks > /tmp/rendered-manifests.yaml
 kubectl apply --dry-run=client -f /tmp/rendered-manifests.yaml
 ```
+
+To explore the new packages without changing either cluster:
+
+```bash
+# Render the deployed Floci namespace overlay.
+kubectl kustomize clusters/floci-eks
+
+# Render the current application collection (empty until you add an app).
+kubectl kustomize apps
+
+# Preview a cluster overlay; this contacts the active cluster but makes no changes.
+kubectl diff -k clusters/floci-eks
+
+# Apply only after verifying the active context is floci-eks.
+kubectl apply -k clusters/floci-eks
+```
+
+`kubectl apply -f` applies already-rendered YAML files. `kubectl apply -k`
+renders a Kustomize directory and applies the result. `kubectl kustomize` only
+prints the rendered result, while `kubectl diff -k` compares that result with
+the active cluster without changing it.
