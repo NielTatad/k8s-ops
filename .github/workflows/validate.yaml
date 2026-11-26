@@ -9,10 +9,12 @@ on:
 permissions:
   contents: read
 
+
 jobs:
   validate:
     name: Lint and validate manifests
     runs-on: ubuntu-latest
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -34,8 +36,16 @@ jobs:
       - name: Build Kustomize overlay
         run: kubectl kustomize clusters/floci-eks > /tmp/rendered-manifests.yaml
 
+      - name: Install Kubeconform
+        run: |
+          curl -sSLo /tmp/kubeconform.tar.gz \
+            https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
+
+          tar -xzf /tmp/kubeconform.tar.gz -C /tmp
+          sudo install /tmp/kubeconform /usr/local/bin/kubeconform
+
       - name: Validate rendered manifests
-        run: kubectl apply --dry-run=client -f /tmp/rendered-manifests.yaml
+        run: kubeconform -strict -summary /tmp/rendered-manifests.yaml
 
   deploy:
     name: Deploy to Floci EKS
